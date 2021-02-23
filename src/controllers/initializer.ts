@@ -235,36 +235,52 @@ export async function create(
     if (waPage) {
       browserInstance && browserInstance(browser, waPage);
 
-      const client = new Whatsapp(waPage, session, mergedOptions);
-      if (mergedOptions.createPathFileToken) {
-        client.onStateChange((state) => {
-          if (state === SocketState.CONNECTED) {
-            setTimeout(() => {
-              saveToken(waPage, session, mergedOptions).catch((e) => {
-                logger.error(e, { session });
-              });
-            }, 1000);
+      let client;
+      try {
+        client = new Whatsapp(waPage, session, mergedOptions);
+        if (mergedOptions.createPathFileToken) {
+          client.onStateChange((state) => {
+            if (state === SocketState.CONNECTED) {
+              setTimeout(() => {
+                saveToken(waPage, session, mergedOptions).catch((e) => {
+                  logger.error(e, { session });
+                });
+              }, 1000);
+            }
+          });
+        }
+
+        let LocalLogin = JSON.parse(
+          await waPage.evaluate(() => {
+            return JSON.stringify(window.localStorage);
+          })
+        );
+
+        let CheckLogin =
+          LocalLogin.WASecretBundle &&
+          LocalLogin.WAToken1 &&
+          LocalLogin.WAToken2
+            ? true
+            : false;
+
+        if (!CheckLogin) {
+          if (mergedOptions.waitForLogin) {
+            const isLogged = await client.waitForLogin(catchQR, statusFind);
+            if (!isLogged) {
+              throw 'Not Logged';
+            }
+            await checkingDesconnected(
+              client,
+              session,
+              options,
+              catchQR,
+              (result, session) => {
+                statusFind && statusFind(result, session);
+              }
+            );
+            await client.restartService();
           }
-        });
-      }
-
-      let LocalLogin = JSON.parse(
-        await waPage.evaluate(() => {
-          return JSON.stringify(window.localStorage);
-        })
-      );
-
-      let CheckLogin =
-        LocalLogin.WASecretBundle && LocalLogin.WAToken1 && LocalLogin.WAToken2
-          ? true
-          : false;
-
-      if (!CheckLogin) {
-        if (mergedOptions.waitForLogin) {
-          const isLogged = await client.waitForLogin(catchQR, statusFind);
-          if (!isLogged) {
-            throw 'Not Logged';
-          }
+        } else {
           await checkingDesconnected(
             client,
             session,
@@ -274,28 +290,22 @@ export async function create(
               statusFind && statusFind(result, session);
             }
           );
-          await client.restartService();
         }
-      } else {
-        await checkingDesconnected(
-          client,
-          session,
-          options,
-          catchQR,
-          (result, session) => {
-            statusFind && statusFind(result, session);
-          }
-        );
-      }
 
-      if (mergedOptions.debug) {
-        const debugURL = `http://localhost:${readFileSync(
-          `./${session}/DevToolsActivePort`
-        ).slice(0, -54)}`;
-        logger.info(`\nDebug: \x1b[34m${debugURL}\x1b[0m`);
-      }
+        if (mergedOptions.debug) {
+          const debugURL = `http://localhost:${readFileSync(
+            `./${session}/DevToolsActivePort`
+          ).slice(0, -54)}`;
+          logger.info(`\nDebug: \x1b[34m${debugURL}\x1b[0m`);
+        }
 
-      return client;
+        return client;
+      } catch (e) {
+        if (client) {
+          e.client = client;
+        }
+        throw e;
+      }
     }
   }
 }
